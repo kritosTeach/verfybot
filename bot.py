@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -5,7 +6,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 # تهيئة قاعدة البيانات
 def init_db():
-    conn = sqlite3.connect('emails.db')
+    conn = sqlite3.connect('/tmp/emails.db' if 'RENDER' in os.environ else 'emails.db')
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS emails
                  (email TEXT PRIMARY KEY, 
@@ -24,7 +25,8 @@ def is_valid_email(email):
 
 # التحقق من وجود الإيميل
 def check_email(email):
-    conn = sqlite3.connect('emails.db')
+    db_path = '/tmp/emails.db' if 'RENDER' in os.environ else 'emails.db'
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute("SELECT email, user_id, username, description, date FROM emails WHERE email=?", (email,))
     result = c.fetchone()
@@ -33,7 +35,8 @@ def check_email(email):
 
 # حجز الإيميل مع الوصف
 def reserve_email(email, user_id, username, description):
-    conn = sqlite3.connect('emails.db')
+    db_path = '/tmp/emails.db' if 'RENDER' in os.environ else 'emails.db'
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     try:
         c.execute("INSERT INTO emails (email, user_id, username, description) VALUES (?, ?, ?, ?)", 
@@ -48,7 +51,8 @@ def reserve_email(email, user_id, username, description):
 
 # حذف الإيميل
 def delete_email_from_db(email, user_id):
-    conn = sqlite3.connect('emails.db')
+    db_path = '/tmp/emails.db' if 'RENDER' in os.environ else 'emails.db'
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute("DELETE FROM emails WHERE email=? AND user_id=?", (email, user_id))
     deleted = c.rowcount
@@ -66,7 +70,8 @@ async def start(update: Update, context: CallbackContext):
         '🔹 /check <إيميل> - للتحقق من إيميل\n'
         '🔹 /my_emails - لعرض إيميلاتي مع زر الحذف\n'
         '🔹 /search <نص> - للبحث عن إيميلات\n'
-        '🔹 /stats - لإحصائيات البوت'
+        '🔹 /stats - لإحصائيات البوت\n'
+        '🔹 /help - للمساعدة'
     )
 
 # أمر /reserve لحجز إيميل مع وصف
@@ -143,7 +148,8 @@ async def check(update: Update, context: CallbackContext):
 async def my_emails(update: Update, context: CallbackContext):
     user = update.effective_user
     
-    conn = sqlite3.connect('emails.db')
+    db_path = '/tmp/emails.db' if 'RENDER' in os.environ else 'emails.db'
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute("SELECT email, description, date FROM emails WHERE user_id=? ORDER BY date DESC", (user.id,))
     emails = c.fetchall()
@@ -199,7 +205,8 @@ async def delete_button_callback(update: Update, context: CallbackContext):
             )
             
             # إعادة عرض الإيميلات المتبقية
-            conn = sqlite3.connect('emails.db')
+            db_path = '/tmp/emails.db' if 'RENDER' in os.environ else 'emails.db'
+            conn = sqlite3.connect(db_path)
             c = conn.cursor()
             c.execute("SELECT email, description, date FROM emails WHERE user_id=? ORDER BY date DESC", (user_id,))
             emails = c.fetchall()
@@ -238,76 +245,9 @@ async def delete_button_callback(update: Update, context: CallbackContext):
                 f"⚠️ ربما الإيميل غير موجود أو ليس لديك صلاحية لحذفه"
             )
 
-# أمر /search للبحث عن إيميلات
-async def search(update: Update, context: CallbackContext):
-    if not context.args:
-        await update.message.reply_text('❌ الرجاء إدخال نص للبحث\nمثال: /search gmail')
-        return
-    
-    search_term = ' '.join(context.args).strip().lower()
-    
-    conn = sqlite3.connect('emails.db')
-    c = conn.cursor()
-    c.execute("SELECT email, username, description, date FROM emails WHERE email LIKE ? OR description LIKE ? ORDER BY email", 
-              ('%' + search_term + '%', '%' + search_term + '%'))
-    results = c.fetchall()
-    conn.close()
-    
-    if results:
-        response = f'🔍 **نتائج البحث عن "{search_term}":**\n\n'
-        for i, (email, username, description, date) in enumerate(results, 1):
-            response += f"{i}. **{email}**\n"
-            response += f"   👤 @{username or 'غير معروف'}\n"
-            response += f"   📝 {description}\n"
-            response += f"   📅 {date}\n\n"
-        
-        response += f"📊 **عدد النتائج:** {len(results)}"
-        
-        # تقسيم الرسالة إذا كانت طويلة
-        if len(response) > 4000:
-            parts = [response[i:i+4000] for i in range(0, len(response), 4000)]
-            for part in parts:
-                await update.message.reply_text(part, parse_mode='Markdown')
-        else:
-            await update.message.reply_text(response, parse_mode='Markdown')
-    else:
-        await update.message.reply_text(f'❌ لا توجد نتائج للبحث عن "{search_term}"')
-
-# أمر /stats للإحصائيات
-async def stats(update: Update, context: CallbackContext):
-    conn = sqlite3.connect('emails.db')
-    c = conn.cursor()
-    
-    # إجمالي الإيميلات
-    c.execute("SELECT COUNT(*) FROM emails")
-    total_emails = c.fetchone()[0]
-    
-    # الإيميلات المحجوزة اليوم
-    c.execute("SELECT COUNT(*) FROM emails WHERE date >= datetime('now', '-1 day')")
-    today_emails = c.fetchone()[0]
-    
-    # المستخدمين النشطين
-    c.execute("SELECT COUNT(DISTINCT user_id) FROM emails")
-    active_users = c.fetchone()[0]
-    
-    # أعلى المستخدمين حجزاً
-    c.execute("SELECT username, COUNT(*) as count FROM emails GROUP BY user_id ORDER BY count DESC LIMIT 5")
-    top_users = c.fetchall()
-    
-    conn.close()
-    
-    response = (
-        f'📊 **إحصائيات البوت:**\n\n'
-        f'📧 إجمالي الإيميلات: {total_emails}\n'
-        f'📅 المحجوزة اليوم: {today_emails}\n'
-        f'👥 المستخدمين النشطين: {active_users}\n\n'
-        f'🏆 **أعلى المستخدمين:**\n'
-    )
-    
-    for i, (username, count) in enumerate(top_users, 1):
-        response += f"{i}. @{username or 'مجهول'}: {count}\n"
-    
-    await update.message.reply_text(response, parse_mode='Markdown')
+# أمر /reeserv (بديل لـ /reserve)
+async def reeserv(update: Update, context: CallbackContext):
+    await reserve(update, context)
 
 # أمر /help
 async def help_command(update: Update, context: CallbackContext):
@@ -318,70 +258,69 @@ async def help_command(update: Update, context: CallbackContext):
 🔹 /reserve <إيميل> <وصف> - لحجز إيميل مع وصف
 🔹 /check <إيميل> - التحقق من حالة إيميل
 🔹 /my_emails - عرض إيميلاتك مع زر الحذف
-🔹 /search <نص> - البحث عن إيميلات
-🔹 /stats - إحصائيات البوت
 🔹 /help - عرض هذه الرسالة
 
 📝 **صيغة الإيميل الصحيحة:**
-- يجب أن يحتوي على @
-- يجب أن يحتوي على نقطة بعد @
 - مثال: username@domain.com
-- مثال: user.name@company.co
-
-📋 **مثال لحجز إيميل مع وصف:**
-/reserve example@gmail.com هذا إيميل للعمل الرسمي
-
-🗑️ **لحذف إيميل:**
-1. استخدم /my_emails
-2. اضغط على زر الحذف بجانب الإيميل
-3. سيتم حذفه فوراً
+- يجب أن يحتوي على @ ونقطة
 
 ⚠️ **ملاحظات:**
 - الحجز دائم حتى تقوم بحذفه
 - كل مستخدم يمكنه حذف إيميلاته فقط
-- الإيميلات مخزنة بشكل آمن
 """
     await update.message.reply_text(help_text)
 
-# أمر /reeserv (بديل لـ /reserve)
-async def reeserv(update: Update, context: CallbackContext):
-    await reserve(update, context)
-
 # الدالة الرئيسية
 def main():
-    # 🔴 ضع التوكن الخاص بك هنا 🔴
-    TOKEN = "8322471161:AAEwthafhAceZSx-dAqHfO8Pzpegf9ppNEc"
+    # التوكن من متغير البيئة في Render
+    TOKEN = os.environ.get("8322471161:AAEwthafhAceZSx-dAqHfO8Pzpegf9ppNEc")
     
-    if TOKEN == "ضع_توكن_بوتك_هنا":
-        print("❌ لم تقم بوضع التوكن!")
-        print("1. اذهب إلى @BotFather في تلغرام")
-        print("2. أرسل /newbot لإنشاء بوت جديد")
-        print("3. انسخ التوكن وضعة مكان 'ضع_توكن_بوتك_هنا'")
+    if not TOKEN:
+        print("❌ TELEGRAM_TOKEN غير موجود!")
+        print("🔹 في Render، اذهب إلى Environment → Add Environment Variable")
+        print("🔹 أضف: Key=TELEGRAM_TOKEN, Value=توكنك")
         return
     
-    # تهيئة قاعدة البيانات
-    init_db()
+    # التحقق من صحة التوكن
+    if ":" not in TOKEN or not TOKEN.split(":")[0].isdigit():
+        print("❌ التوكن غير صحيح!")
+        print("📌 التوكن يجب أن يكون بهذا الشكل: 123456789:ABCdef...")
+        return
     
-    # إنشاء التطبيق
-    app = Application.builder().token(TOKEN).build()
-    
-    # إضافة الأوامر
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("reserve", reserve))
-    app.add_handler(CommandHandler("reeserv", reeserv))  # اسم بديل
-    app.add_handler(CommandHandler("check", check))
-    app.add_handler(CommandHandler("my_emails", my_emails))
-    app.add_handler(CommandHandler("search", search))
-    app.add_handler(CommandHandler("stats", stats))
-    app.add_handler(CommandHandler("help", help_command))
-    
-    # إضافة معالج لزر الحذف
-    app.add_handler(CallbackQueryHandler(delete_button_callback, pattern=r'^delete_'))
-    
-    # بدء البوت
-    print("🤖 بوت حجز الإيميلات مع الوصف يعمل...")
-    print("📧 يمكنك الآن حجز الإيميلات مع وصف وحذفها!")
-    app.run_polling()
+    try:
+        # تهيئة قاعدة البيانات
+        init_db()
+        
+        # إنشاء التطبيق
+        print(f"🔹 جاري إنشاء التطبيق مع التوكن: {TOKEN[:10]}...")
+        app = Application.builder().token(TOKEN).build()
+        
+        # إضافة الأوامر
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("reserve", reserve))
+        app.add_handler(CommandHandler("reeserv", reeserv))
+        app.add_handler(CommandHandler("check", check))
+        app.add_handler(CommandHandler("my_emails", my_emails))
+        app.add_handler(CommandHandler("help", help_command))
+        
+        # إضافة معالج لزر الحذف
+        app.add_handler(CallbackQueryHandler(delete_button_callback, pattern=r'^delete_'))
+        
+        # بدء البوت
+        print("✅" * 50)
+        print("🤖 بوت حجز الإيميلات يعمل بنجاح!")
+        print(f"📧 البوت ID: {TOKEN.split(':')[0]}")
+        print(f"🌍 البيئة: {'Render' if 'RENDER' in os.environ else 'Local'}")
+        print("✅" * 50)
+        
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
+        
+    except Exception as e:
+        print("❌" * 50)
+        print(f"خطأ في تشغيل البوت: {type(e).__name__}")
+        print(f"التفاصيل: {e}")
+        print("❌" * 50)
+        raise
 
 if __name__ == '__main__':
     main()
