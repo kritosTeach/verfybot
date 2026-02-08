@@ -7,5 +7,5 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
     envVars:
-      - key: 8322471161:AAEwthafhAceZSx-dAqHfO8Pzpegf9ppNEc
+      - key:  TELEGRAM_TOKEN
         sync: false
