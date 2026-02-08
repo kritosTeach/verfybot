@@ -12,7 +12,7 @@ def main():
     # TOKEN = "ضع_توكن_بوتك_هنا"
     
     # طريقة 2: من متغير بيئة
-    TOKEN = os.environ.get("TELEGRAM_TOKEN", "ضع_توكن_بوتك_هنا")
+    TOKEN = os.environ.get("7544040053:AAE4jEeMnpoI3L7Fc_s0yTe6F8gkuvD5-Ug", "ضع_توكن_بوتك_هنا")
     
     # طريقة 3: من ملف .env
     # from dotenv import load_dotenv
